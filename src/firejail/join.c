@@ -24,11 +24,19 @@
 #include <unistd.h>
 #include <sys/prctl.h>
 #include <errno.h>
+#include <sys/ioctl.h>
+#include <termios.h>
 
 static int apply_caps = 0;
 static uint64_t caps = 0;
 static int apply_seccomp = 0;
 #define BUFLEN 4096
+
+static void signal_handler(int sig){
+	ctflush();
+
+	exit(sig);
+}
 
 static void extract_command(int argc, char **argv, int index) {
 	EUID_ASSERT();
@@ -384,8 +392,14 @@ void join(pid_t pid, int argc, char **argv, int index) {
 		// it will never get here!!!
 	}
 
+
+	signal (SIGTERM, signal_handler);
+
 	// wait for the child to finish
 	waitpid(child, NULL, 0);
+
+	ctflush();
+
 	exit(0);
 }
 
