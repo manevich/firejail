@@ -26,6 +26,8 @@
 #include <errno.h>
 #include <dirent.h>
 #include <grp.h>
+#include <sys/ioctl.h>
+#include <termios.h>
 
 #define MAX_GROUPS 1024
 // drop privileges
@@ -685,4 +687,21 @@ static int remove_callback(const char *fpath, const struct stat *sb, int typefla
 int remove_directory(const char *path) {
 	// FTW_PHYS - do not follow symbolic links
 	return nftw(path, remove_callback, 64, FTW_DEPTH | FTW_PHYS);
+}
+
+
+void ctflush(void) {
+	// flush controlling terminal to protect from TIOCSTI exploits
+	int fd = open("/dev/tty", O_RDWR);
+	if (fd != -1) {
+		ioctl(fd, TIOCNOTTY);
+		ioctl(fd, TCFLSH, TCIFLUSH);
+		ioctl(fd, TIOCSCTTY);
+		close(fd);
+	} else {
+		fprintf(stderr, "Warning: can't open /dev/tty, flushing stdin, stdout and stderr file descriptors instead\n");
+		ioctl(0, TCFLSH, TCIFLUSH);
+		ioctl(1, TCFLSH, TCIFLUSH);
+		ioctl(2, TCFLSH, TCIFLUSH);
+	}
 }
