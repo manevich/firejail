@@ -394,6 +394,15 @@ void fs_blacklist(void) {
 			continue;
 		}
 
+		// args- commands are translated in profile.c
+		if (strncmp(entry->data, "args-path ", 10) == 0
+		    || strncmp(entry->data, "args-whitelist ", 15) == 0
+		    || strncmp(entry->data, "args-read-only ", 15) == 0
+		    || strncmp(entry->data, "args-noexec ", 11) == 0) {
+			entry = entry->next;
+			continue;
+		}
+
 		// process bind command
 		if (strncmp(entry->data, "bind ", 5) == 0)  {
 			char *dname1 = entry->data + 5;

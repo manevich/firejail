@@ -405,6 +405,8 @@ void profile_read(const char *fname);
 int profile_check_line(char *ptr, int lineno, const char *fname);
 // add a profile entry in cfg.profile list; use str to populate the list
 void profile_add(char *str);
+// remove profile entry, str must be exactly same as entry to be deleted
+void profile_del(char *str);
 
 // list.c
 void list(void);

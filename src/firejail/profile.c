@@ -23,6 +23,10 @@
 
 #define MAX_READ 8192				  // line buffer for profile files
 
+char **args_path = NULL;
+int args_path_c = 0;
+int args_path_m = 8;
+
 // find and read the profile specified by name from dir directory
 int profile_find(const char *name, const char *dir) {
 	EUID_ASSERT();
@@ -844,7 +848,7 @@ int profile_check_line(char *ptr, int lineno, const char *fname) {
 
 			// find first non-option arg
 			int i;
-			for (i = 1; i < cfg.original_argc && strncmp(cfg.original_argv[i], "--", 2) != 0; i++);
+			for (i = 1; i < cfg.original_argc && strncmp(cfg.original_argv[i], "--", 2) == 0; i++);
 
 			join(pid, cfg.original_argc,cfg.original_argv, i + 1);
 			exit(0);
@@ -855,6 +859,119 @@ int profile_check_line(char *ptr, int lineno, const char *fname) {
 		if (strlen(cfg.name) == 0) {
 			fprintf(stderr, "Error: invalid sandbox name\n");
 			exit(1);
+		}
+		return 0;
+	}
+
+	if (strncmp(ptr, "args-path ", 10) == 0) {
+		if ((ptr + 10)[0] == '\0') {
+			fprintf(stderr, "Error: empty args-path on line %d\n", lineno);
+			exit(1);
+		}
+
+		if (args_path_c == 0 || args_path_c >= args_path_m) {
+			args_path_m *= 2;
+			args_path = realloc(args_path, sizeof(*args_path) * args_path_m);
+
+			if (args_path == NULL)
+						errExit("failed increasing memory for args_path entries");
+		}
+
+		char *expanded = expand_home(ptr + 10, cfg.homedir);
+		char *path = realpath(expanded, NULL);
+		if (!path)
+			return 0;
+		args_path[args_path_c] = path;
+		args_path_c++;
+
+		if (arg_debug || arg_debug_whitelists)
+			printf("Added %s to args-path\n", path);
+
+		char *line;
+		if (asprintf(&line, "blacklist %s", path) == -1)
+			errExit("asprintf");
+		profile_check_line(line, 0, NULL);	// will exit if something wrong
+		profile_add(line);
+
+		return 0;
+	}
+
+	if (strncmp(ptr, "args-whitelist ", 15) == 0 ||
+		strncmp(ptr, "args-read-only ", 15) == 0 ||
+		strncmp(ptr, "args-noexec ", 12) == 0) {
+
+		char *pattern = index(ptr, ' ') + 1;
+
+		pattern[-1] = '\0';
+		char *cmd = strdup(ptr + 5);
+		if (!cmd)
+			errExit("strdup");
+		pattern[-1] = ' ';
+
+		if (args_path_c == 0) {
+			fprintf(stderr, "Error: args-%s must be used after args-path\n", cmd);
+			exit(1);
+		}
+
+		if (pattern[0] == '\0') {
+			fprintf(stderr, "Error: empty args-%s pattern on line %d\n", cmd, lineno);
+			exit(1);
+		}
+
+		char *splitter = index(pattern, '*');
+		if (splitter != rindex(pattern, '*')) {
+			fprintf(stderr, "Error: more than one asterisk in args-%s pattern on line %d\n", cmd, lineno);
+			exit(1);
+		}
+
+		// handle both "--opt=*.ext" and ".ext" patterns
+		if (splitter) *splitter = '\0';
+		char *prefix = splitter ? pattern : "";
+		char *suffix = splitter ? splitter + 1 : pattern;
+
+		// add whitelist commands for matching args
+		char *filename;
+		int i, j;
+		for (i = 1; i < cfg.original_argc && strncmp(cfg.original_argv[i], "--", 2) == 0; i++);
+		i++;
+		for (; i < cfg.original_argc; i++) {
+			char *arg = cfg.original_argv[i];
+			if (strncmp(arg, prefix, strlen(prefix)) == 0) {
+				// prefix matched
+				filename = arg + strlen(prefix);
+				if (strcmp(arg + strlen(arg) - strlen(suffix), suffix) == 0 && access(filename, F_OK) == 0) {
+					// pattern matched and file exist
+					if (arg_debug || arg_debug_whitelists)
+								printf("arg-%s: %s arg matched pattern\n", cmd, arg);
+
+					char *path = realpath(filename, NULL);
+					if (!path)
+						errExit("realpath"); // file exist and accessible but realpath still failed
+
+					// check if allowed by "arg-path" rules and add whitelist command
+					for (j = 0; j < args_path_c; j++)
+						if (strncmp(path, args_path[j], strlen(args_path[j])) == 0) {
+							char *line;
+
+							// remove blacklisting if file going to be whitelisted
+							if (strcmp(cmd, "whitelist") == 0) {
+								if (asprintf(&line, "blacklist %s", args_path[j]) == -1)
+									errExit("asprintf");
+								profile_del(line);
+								free(line);
+							}
+
+							if (asprintf(&line, "%s %s", cmd, path) == -1)
+								errExit("asprintf");
+							profile_check_line(line, 0, NULL);	// will exit if something wrong
+							profile_add(line);
+							if (arg_debug || arg_debug_whitelists)
+								printf("arg-%s: adding %s\n", cmd, path);
+							break;
+						}
+					free(path);
+				}
+			}
 		}
 		return 0;
 	}
@@ -935,6 +1052,18 @@ void profile_add(char *str) {
 	while (ptr->next != NULL)
 		ptr = ptr->next;
 	ptr->next = prf;
+}
+
+// remove profile entry, str must be exactly same as entry to be deleted
+void profile_del(char *str) {
+	EUID_ASSERT();
+
+	ProfileEntry *ptr = cfg.profile;
+	while (ptr->next != NULL) {
+		if (strcmp(ptr->data, str) == 0)
+			*ptr->data = '\0';
+		ptr = ptr->next;
+	}
 }
 
 // read a profile file

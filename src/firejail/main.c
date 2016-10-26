@@ -1359,6 +1359,25 @@ int main(int argc, char **argv) {
 				exit(1);
 			}
 		}
+		else if (strncmp(argv[i], "--args-path=", 12) == 0
+		         || strncmp(argv[i], "--args-whitelist=", 17) == 0
+		         || strncmp(argv[i], "--args-read-only=", 17) == 0
+		         || strncmp(argv[i], "--args-noexec=", 14) == 0) {
+			if (checkcfg(CFG_WHITELIST)) {
+				char *line = strdup(argv[i] + 2);
+				if (!line)
+					errExit("strdup");
+				char *tmp = index(line, '=');
+				tmp[0] = ' ';
+
+				profile_check_line(line, 0, NULL);	// will exit if something wrong
+				profile_add(line);
+			}
+			else {
+				fprintf(stderr, "Error: whitelist feature is disabled in Firejail configuration file\n");
+				exit(1);
+			}
+		}
 #endif		
 
 		else if (strncmp(argv[i], "--read-only=", 12) == 0) {
